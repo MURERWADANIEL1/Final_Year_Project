@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "../../../Desktop/Final_Year/Codes"
+		},
+		{
+			"name": "Blink",
+			"path": "../../PlatformIO/Projects/Blink"
+		},
+		{
+			"name": "250115-225844-nodemcu-32s",
+			"path": "../../PlatformIO/Projects/250115-225844-nodemcu-32s"
+		}
+	],
+	"settings": {}
+}
