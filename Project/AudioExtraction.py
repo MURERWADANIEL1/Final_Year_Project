@@ -10,9 +10,11 @@ import shutil
 patient_diagnosis_info=pd.read_csv(r'C:\Users\Jiary\Downloads\archive\Respiratory_Sound_Database\Respiratory_Sound_Database\patient_diagnosis.csv',names=['pid','disease'])
 print(patient_diagnosis_info.head())
 audio_dir = r'C:\Users\Jiary\Downloads\archive\Respiratory_Sound_Database\Respiratory_Sound_Database\audio_and_txt_files'
-#print(os.listdir(audio_dir))
 print(len(os.listdir(audio_dir)))
 
+df=pd.read_csv(r'C:/Users/Jiary/Downloads/archive/Respiratory_Sound_Database/Respiratory_Sound_Database/audio_and_txt_files/160_1b3_Al_mc_AKGC417L.txt',sep='\t')
+df.head()
+# Get all the filenames
 files = [s.split('.')[0] for s in os.listdir(audio_dir) if '.txt' in s]
 
 def getFilenameInfo(file):
@@ -20,7 +22,7 @@ def getFilenameInfo(file):
 
 files_data = []
 for file in files:
-    data = pd.read_csv(audio_dir + file + '.txt', sep='\t', names=['start', 'end', 'crackles', 'weezels'])
+    data = pd.read_csv(audio_dir + file + '.txt', sep='\t', names=['start', 'end', 'crackles', 'wheezles'])
     name_data = getFilenameInfo(file)
     data['pid'] = name_data[0]
     data['mode'] = name_data[-2]
@@ -29,11 +31,8 @@ for file in files:
 
 files_df = pd.concat(files_data)
 files_df.reset_index(inplace=True)
-
-
 patient_diagnosis_info['pid'] = patient_diagnosis_info['pid'].astype('int32')
 files_df['pid'] = files_df['pid'].astype('int32')
-
 data = pd.merge(files_df, patient_diagnosis_info, on='pid')
 
 target_samples = 160
