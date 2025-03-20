@@ -1,0 +1,73 @@
+import os
+import pandas as pd
+import librosa
+import librosa.display
+import matplotlib.pyplot as plt
+import numpy as np
+import shutil
+
+# Load patient diagnosis information
+patient_diagnosis_info = pd.read_csv(r'C:\Users\Jiary\Downloads\archive\Respiratory_Sound_Database\Respiratory_Sound_Database\patient_diagnosis.csv',
+    names=['pid', 'disease'])
+print(patient_diagnosis_info.head())
+# Define the directory containing audio and text files
+audio_dir = r'C:\Users\Jiary\Downloads\archive\Respiratory_Sound_Database\Respiratory_Sound_Database\audio_and_txt_files'
+# Get all text files in the directory
+txt_files = [f for f in os.listdir(audio_dir) if f.endswith('.txt')]
+print(f"Total .txt files found: {len(txt_files)}")
+# Function to extract details from filenames
+def parse_filename(filename):
+    parts = filename.split('_')
+    if len(parts) == 5:
+        pid = int(parts[0])#PID
+        recording_index = parts[1]#Recording index
+        chest_location = parts[2]#Chest location
+        acquisition_mode = parts[3]#Acquisition mode
+        equipment = parts[4].split('.')[0]#equipment
+        return pid, recording_index, chest_location, acquisition_mode, equipment
+    else:
+        raise ValueError(f"Filename {filename} does not match the expected format.")
+# Audio Process for txt file
+files_data = []
+for txt_file in txt_files:
+    try:
+        # Extract details from the filename
+        pid, recording_index, chest_location, acquisition_mode, equipment = parse_filename(txt_file)
+        
+        # Read the .txt file
+        file_path = os.path.join(audio_dir, txt_file)
+        data = pd.read_csv(file_path, sep='\t', names=['start', 'end', 'crackles', 'wheezes'])
+        
+        # Add metadata columns
+        data['pid'] = pid
+        data['recording_index'] = recording_index
+        data['chest_location'] = chest_location
+        data['acquisition_mode'] = acquisition_mode
+        data['equipment'] = equipment
+        data['filename'] = txt_file
+        
+        # Append to the list
+        files_data.append(data)
+    except Exception as e:
+        print(f"Error processing file {txt_file}: {e}")
+
+# Combine all data into a single DataFrame
+files_df = pd.concat(files_data)
+files_df.reset_index(drop=True, inplace=True)
+
+# Merge with patient diagnosis information
+files_df['pid'] = files_df['pid'].astype('int32')
+patient_diagnosis_info['pid'] = patient_diagnosis_info['pid'].astype('int32')
+merged_data = pd.merge(files_df, patient_diagnosis_info, on='pid')
+
+# Handle repeated measurements (optional: aggregate or keep all)
+# Example: Keep all measurements but add a unique identifier
+merged_data['measurement_id'] = merged_data.groupby(['pid', 'recording_index', 'chest_location', 'acquisition_mode', 'equipment']).cumcount() + 1
+
+# Save the final dataset
+output_dir = 'processed_data'
+os.makedirs(output_dir, exist_ok=True)
+output_file = os.path.join(output_dir, 'respiratory_sound_data.csv')
+merged_data.to_csv(output_file, index=False)
+
+print(f"Data processing complete. Check {output_file}.")
