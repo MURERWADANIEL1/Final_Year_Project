@@ -3,6 +3,9 @@ import pandas as pd
 import shutil
 import numpy as np
 from scipy.io import wavfile
+import numpy as np
+from scipy.io import wavfile
+import matplotlib.pyplot as plt
 
 # Load patient diagnosis information 
 patient_diagnosis_info = pd.read_csv(r'C:\Users\Jiary\Documents\GitHub\ML\patient_diagnosis_filtered_data.csv',
@@ -57,4 +60,3 @@ for wav_file in os.listdir(audio_dir):
             wavfile.write(segment_path, sr, segmented_audio)
             print(f'Saved Segment: {segment_name}')
 print("Segmentation Complete. Segmented files saved to: ", output_audio_dir)
-

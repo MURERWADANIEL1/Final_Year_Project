@@ -12,7 +12,7 @@ import json
 from tqdm import tqdm
 
 # Loading Data
-patient_diagnosis_info = pd.read_csv(r'C:\Users\Jiary\Documents\GitHub\ML\patient_diagnosis_filtered_data.csv',
+patient_diagnosis_info = pd.read_csv(r'C:\Users\Jiary\Documents\GitHub\ML\csv_data\patient_diagnosis_filtered_data.csv',
                                      names=['pid', 'disease'])
 print(patient_diagnosis_info.head())
 
