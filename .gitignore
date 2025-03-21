@@ -1,4 +1,12 @@
+
+.git.bfg-report/
+Filtered_audio_files/
+Final_Audio_Dataset/
+Processed_Audio_Files/
+Spectograms/
 *.txt
 *.npy
 *.wav
 
+ML.git/
+ML/
