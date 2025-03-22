@@ -1,0 +1,66 @@
+Folder: C:\Users\Jiary\Documents\GitHub\ML\Spectograms\URTI | Number of files: 648
+Folder: C:\Users\Jiary\Documents\GitHub\ML\Spectograms\Healthy | Number of files: 712
+Folder: C:\Users\Jiary\Documents\GitHub\ML\Spectograms\COPD | Number of files: 5746
+Folder: C:\Users\Jiary\Documents\GitHub\ML\Spectograms\Bronchiectasis | Number of files: 499
+Folder: C:\Users\Jiary\Documents\GitHub\ML\Spectograms\Pneumonia | Number of files: 700
+Folder: C:\Users\Jiary\Documents\GitHub\ML\Spectograms\Bronchiolitis | Number of files: 520
+
+In each of these files in these folders is .npy files which was extracted from the audio data 
+
+Each file name is divided into 9 elements, separated with underscores (_).
+
+1. Patient number (101,102,...,226)
+2.  Recording index
+3.  Chest location
+ a. Trachea (Tc)
+        b. Anterior left (Al)
+ c. Anterior right (Ar)
+ d. Posterior left (Pl)
+ e. Posterior right (Pr)
+ f. Lateral left (Ll)
+ g. Lateral right (Lr) 
+4. Acquisition mode 
+ a. sequential/single channel (sc), 
+ b. simultaneous/multichannel (mc)
+5.  Recording equipment 
+     a. AKG C417L Microphone (AKGC417L), 
+     b. 3M Littmann Classic II SE Stethoscope (LittC2SE), 
+     c. 3M Litmmann 3200 Electronic Stethoscope (Litt3200), 
+     d.  WelchAllyn Meditron Master Elite Electronic Stethoscope (Meditron)
+
+The annotation text files have four columns:
+- Beginning of respiratory cycle(s)
+- End of respiratory cycle(s)
+- Presence/absence of crackles (presence=1, absence=0)
+- Presence/absence of wheezes (presence=1, absence=0)
+
+The abbreviations used in the diagnosis file are:
+- COPD: Chronic Obstructive Pulmonary Disease
+- LRTI: Lower Respiratory Tract Infection
+- URTI: Upper Respiratory Tract Infection
+
+6. Segment number derived from annotation information. a single file can have several segments named systematically seg1, seg2 etc
+
+7. Crackle number with C0.0 being no crackle and C1.0 there is a crackle
+
+8. Wheezle number with W0.0 being no Wheezle and W1.0 there is a Wheezle
+
+A given segment can have C0.0 and W0.0 or W0.0 and C1.0 or C0.0 and W1.0 or W1.0 and C1.0
+
+9. Augmentation number. Where some files were augmented to sort the data imbalance
+Every augmented file has all first 8 elements and added aug1, aug2 etc. to them to show it has been augmented. 
+
+
+In summary: 111_1b2_Tc_sc_Meditron_seg0_C0.0_W0.0_aug1.npy is an example
+111, Patient number
+1b2, Recording index
+Tc, Chest location
+sc, Acquisition mode  
+Meditron, Recording equipment
+seg0, Segment number
+C0.0, crackle
+W0.0, Wheezle
+aug1, Augmentation number
+.npy, file extension
+
+

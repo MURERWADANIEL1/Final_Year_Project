@@ -2,6 +2,7 @@ import librosa
 import librosa.display
 import random
 import os
+import wave
 import pandas as pd
 import shutil
 from scipy.io import wavfile
