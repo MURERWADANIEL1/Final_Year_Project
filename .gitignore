@@ -8,3 +8,9 @@ Spectograms/
 *.wav
 
 
+.devcontainer/devcontainer.json
+.devcontainer/Dockerfile
+.vscode/launch.json
+.vscode/settings.json
+.vscode/tasks.json
+.vscode/c_cpp_properties.json
