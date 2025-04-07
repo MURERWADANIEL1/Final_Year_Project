@@ -7,7 +7,7 @@ import asyncio
 from bleak import BleakClient, BleakScanner
 
 # Constants
-DEVICE_ADDRESS = "XX:XX:XX:XX:XX:XX"  # Replace with your device's address
+DEVICE_ADDRESS = "10:06:1c:f4:7e:1e"  # Replace with your device's address
 AUDIO_CHARACTERISTIC_UUID = "8fd0a2f0-e842-492b-8d9c-213e28678075"  # Replace with the correct UUID
 SAMPLE_RATE = 22050
 N_MELS = 128  # Example: Number of Mel bands used during training
