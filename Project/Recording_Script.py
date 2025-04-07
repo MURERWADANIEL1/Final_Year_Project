@@ -1,47 +1,147 @@
-import serial
-import wave
 import numpy as np
+import librosa
+import wave
+import tensorflow.lite as tflite
+import time
+import asyncio
+from bleak import BleakClient, BleakScanner
 
-# Serial port where ESP32 is connected (adjust accordingly)
-SERIAL_PORT = "COM6"  # Change to "/dev/ttyUSB0" for Linux/Mac
-BAUD_RATE = 115200
+# Constants
+DEVICE_ADDRESS = "XX:XX:XX:XX:XX:XX"  # Replace with your device's address
+AUDIO_CHARACTERISTIC_UUID = "8fd0a2f0-e842-492b-8d9c-213e28678075"  # Replace with the correct UUID
 SAMPLE_RATE = 22050
-BUFFER_SIZE = 256  # Matches ESP32 buffer
-DURATION = 15  # Seconds to record
+N_MELS = 128  # Example: Number of Mel bands used during training
+FEATURE_SIZE = 3840  # Must match model input shape
+DURATION = 10  # Seconds to record
+MODEL_PATH = "/home/pi/models/audio_project/audio2.lite"  # Path to your model
+MIN_CONFIDENCE = 0.7  # Minimum confidence for a valid prediction
 
-# Open serial connection
-ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+class_labels = ["Healthy", "COPD", "URTI", "Bronchiectasis", "Pneumonia", "Bronchiolitis"]
 
-# Prepare WAV file
-filename = "recorded_audio.wav"
-wav_file = wave.open(filename, "wb")
-wav_file.setnchannels(1)  # Mono
-wav_file.setsampwidth(2)  # 16-bit audio (same as ESP32 ADC output)
-wav_file.setframerate(SAMPLE_RATE)
-
-print(f"Recording {DURATION} seconds of audio...")
-
-audio_data = []
-num_samples = SAMPLE_RATE * DURATION
-
+# Load TFLite model
 try:
-    while len(audio_data) < num_samples:
-        if ser.in_waiting >= BUFFER_SIZE * 2:  # Check for available data
-            raw_bytes = ser.read(BUFFER_SIZE * 2)  # Read 16-bit samples
-            samples = np.frombuffer(raw_bytes, dtype=np.int16)
-            audio_data.extend(samples)
+    interpreter = tflite.Interpreter(model_path=MODEL_PATH)
+    interpreter.allocate_tensors()
+    print(f"Loaded TFLite model from {MODEL_PATH}")
+except Exception as e:
+    print(f"Error loading TFLite model: {e}")
+    exit()
 
-except KeyboardInterrupt:
-    print("Recording stopped.")
+# Get model input/output details
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
 
-# Convert list to numpy array
-audio_data = np.array(audio_data[:num_samples], dtype=np.int16)
+class AudioRecorder:
+    def __init__(self, address, characteristic_uuid, duration, sample_rate):
+        self.address = address
+        self.characteristic_uuid = characteristic_uuid
+        self.duration = duration
+        self.sample_rate = sample_rate
+        self.audio_data = []
+        self.is_recording = False
 
-# Write to WAV file
-wav_file.writeframes(audio_data.tobytes())
-wav_file.close()
+    async def notification_handler(self, sender, data):
+        """Callback for receiving data notifications."""
+        if self.is_recording:
+            samples = np.frombuffer(data, dtype=np.int16)
+            self.audio_data.extend(samples)
 
-print(f"Recording saved as {filename}")
+    async def record_audio_from_ble(self):
+        """Records audio from the BLE device."""
+        print(f"Recording {self.duration} seconds of audio from BLE...")
+        self.audio_data = []
+        self.is_recording = True
+        num_samples = self.sample_rate * self.duration
+        start_time = time.time()
 
-# Close serial connection
-ser.close()
+        async with BleakClient(self.address) as client:
+            if not client.is_connected:
+                print(f"Failed to connect to {self.address}")
+                return None
+            print(f"Connected to {self.address}")
+            await client.start_notify(self.characteristic_uuid, self.notification_handler)
+
+            while len(self.audio_data) < num_samples:
+                if time.time() - start_time > self.duration + 2:
+                    print("Timeout: Did not receive enough data within the expected time.")
+                    break
+                await asyncio.sleep(0.1)  # Check every 100ms
+
+            await client.stop_notify(self.characteristic_uuid)
+            print("Recording complete!")
+            self.is_recording = False
+            return np.array(self.audio_data[:num_samples], dtype=np.int16)
+
+def extract_features(audio_data, sample_rate):
+    """Extracts a Mel spectrogram and reshapes it to match model input."""
+    # Convert to float32 and normalize to [-1, 1]
+    audio_data = audio_data.astype(np.float32) / np.iinfo(np.int16).max
+
+    # Compute Mel spectrogram
+    spectrogram = librosa.feature.melspectrogram(y=audio_data, sr=sample_rate, n_mels=N_MELS)
+    spectrogram = librosa.power_to_db(spectrogram, ref=np.max)  # Convert to dB scale
+
+    # Normalize to [0, 1] (important for TFLite model) - Use training data min/max if possible
+    # Example: Assuming you know the min/max from training:
+    train_min = -80.0  # Replace with your actual training min
+    train_max = 0.0   # Replace with your actual training max
+    spectrogram = (spectrogram - train_min) / (train_max - train_min)
+    spectrogram = np.clip(spectrogram, 0, 1) # Clip values to be within [0,1]
+
+    # Flatten to 1D feature vector
+    spectrogram = spectrogram.flatten()
+    print(f"Spectrogram Shape: {spectrogram.shape}")  # (n_mels, time_frames)
+    print(f"Number of Features: {spectrogram.size}")
+
+    # Ensure it has exactly FEATURE_SIZE elements
+    if len(spectrogram) != FEATURE_SIZE:
+        print(f"Warning: Spectrogram size ({len(spectrogram)}) does not match expected size ({FEATURE_SIZE}).")
+        if len(spectrogram) > FEATURE_SIZE:
+            spectrogram = spectrogram[:FEATURE_SIZE]  # Trim
+        else:
+            spectrogram = np.pad(spectrogram, (0, FEATURE_SIZE - len(spectrogram)), mode='constant')  # Pad
+
+    # Reshape to match TFLite input (1, 3840)
+    return np.expand_dims(spectrogram, axis=0).astype(np.float32)
+
+async def classify_audio(recorder):
+    """Records audio, extracts features, and runs inference."""
+    audio_data = await recorder.record_audio_from_ble()
+    if audio_data is None:
+        print("No audio data received.")
+        return
+
+    # Prepare WAV file
+    filename = "recorded_audio.wav"
+    wav_file = wave.open(filename, "wb")
+    wav_file.setnchannels(1)  # Mono
+    wav_file.setsampwidth(2)  # 16-bit audio (same as ESP32 ADC output)
+    wav_file.setframerate(SAMPLE_RATE)
+    wav_file.writeframes(audio_data.tobytes())
+    wav_file.close()
+    print(f"Recording saved as {filename}")
+
+    spectrogram = extract_features(audio_data, SAMPLE_RATE)
+
+    # Set input tensor
+    interpreter.set_tensor(input_details[0]['index'], spectrogram)
+    interpreter.invoke()
+
+    # Get output tensor
+    output_data = interpreter.get_tensor(output_details[0]['index'])
+    # Get predicted label
+    predicted_label = np.argmax(output_data)  # Get class with highest confidence
+    confidence = output_data[0][predicted_label]  # Confidence score
+
+    if confidence >= MIN_CONFIDENCE:
+        print(f"Prediction: {class_labels[predicted_label]} (Confidence: {confidence:.2f})")
+    else:
+        print(f"Prediction: Unknown (Confidence: {confidence:.2f} below threshold)")
+    print(f"Raw model output: {output_data}")
+
+async def main():
+    recorder = AudioRecorder(DEVICE_ADDRESS, AUDIO_CHARACTERISTIC_UUID, DURATION, SAMPLE_RATE)
+    await classify_audio(recorder)
+
+if __name__ == "__main__":
+    asyncio.run(main())

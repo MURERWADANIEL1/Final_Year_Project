@@ -2,6 +2,9 @@
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
+#include <BLE2902.h>
+#include <BluetoothSerial.h>
+
 
 #define SERVICE_UUID        "63661bda-e38c-4eb0-9389-12523579b526"
 #define CHARACTERISTIC_UUID "8fd0a2f0-e842-492b-8d9c-213e28678075"
@@ -28,7 +31,10 @@ class MyServerCallbacks: public BLEServerCallbacks{
 void setup() {
   Serial.begin(115200);
   Serial.println("Starting BLE Work");
+  Serial.print("Bluetooth Device MAC Address: ");
+  serial.println(BLEDevice::getAddress().toString().c_str());
   BLEDevice::init("ESP32_Audio_Test");
+
   BLEServer *pServer = BLEDevice::createServer();
   BLEService *pService = pServer->createService(SERVICE_UUID);
   BLECharacteristic *pCharacteristic = pService->createCharacteristic(
