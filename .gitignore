@@ -1,3 +1,8 @@
+FETCH_HEAD
+.gitignoreR
+.gitignore
+
+Codes.code-workspace
 .git.bfg-report/
 Filtered_audio_files/
 Final_Audio_Dataset/
