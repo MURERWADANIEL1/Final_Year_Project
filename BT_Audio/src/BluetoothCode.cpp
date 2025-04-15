@@ -6,6 +6,7 @@
 #include "esp_bt_device.h"
 #include "esp_gap_ble_api.h"
 
+
 // UUIDs
 #define SERVICE_UUID        "63661bda-e38c-4eb0-9389-12523579b526"
 #define CHARACTERISTIC_UUID "8fd0a2f0-e842-492b-8d9c-213e28678075"
@@ -15,8 +16,16 @@ BLECharacteristic* pCharacteristic = nullptr;
 
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
+
+const int Mic=34;
+#define BUFFER_SIZE 256
+uint8_t audioBuffer[BUFFER_SIZE];
+
 unsigned long lastNotifyTime = 0;
-const unsigned long notifyInterval = 1000; // 1 second
+const unsigned long notifyInterval = 20; 
+
+unsigned long startTime=0;
+bool started =false;
 
 // Server Callbacks
 class MyServerCallbacks : public BLEServerCallbacks {
@@ -28,6 +37,9 @@ class MyServerCallbacks : public BLEServerCallbacks {
   void onDisconnect(BLEServer* pServer) override {
     deviceConnected = false;
     Serial.println("Device disconnected");
+    delay(100);
+    pServer->getAdvertising()->start();
+    Serial.println("Restarted Advertising");
   }
 };
 
@@ -68,9 +80,9 @@ void setup() {
   delay(1000);
 
   Serial.println("Starting BLE...");
-  BLEDevice::init("ESP32_Audio_Test");
+  BLEDevice::init("ESP32_BT_ML_PROJECT");
+  
   Serial.println(BLEDevice::getAddress().toString().c_str());
-
 
   // Create BLE Server
   pServer = BLEDevice::createServer();
@@ -82,25 +94,22 @@ void setup() {
   // Create BLE Characteristic
   pCharacteristic = pService->createCharacteristic(
     CHARACTERISTIC_UUID,
-    BLECharacteristic::PROPERTY_READ |
-    BLECharacteristic::PROPERTY_WRITE |
-    BLECharacteristic::PROPERTY_NOTIFY |
-    BLECharacteristic::PROPERTY_INDICATE
+    BLECharacteristic::PROPERTY_NOTIFY 
   );
 
   pCharacteristic->setValue("Hello from ESP32");
   pCharacteristic->addDescriptor(new BLE2902());
-
-  // Start the service
   pService->start();
+  pServer->getAdvertising()->start();
 
-  // Advertise BLE
+    // Advertise BLE
   BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(false);
   pAdvertising->setMinPreferred(0x06);  // Recommended for Android
   BLEDevice::startAdvertising();
 
+  analogReadResolution(12);
   Serial.println("BLE advertising started");
 
   // Set up BLE security
@@ -117,23 +126,27 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
 
-  if (deviceConnected && (currentMillis - lastNotifyTime >= notifyInterval)) {
-    if (pCharacteristic != nullptr) {
-      pCharacteristic->setValue("New value from ESP32");
-      pCharacteristic->notify();
-      Serial.println("Notified client");
+  if (deviceConnected) {
+    // Notify client every second
+    if (!started){
+      startTime=millis();
+      started=true;
+      Serial.println("Start Streaming Audio");      
     }
-    lastNotifyTime = currentMillis;
+
+    if (millis() - startTime <= 15000) {
+      for (int i = 0; i < BUFFER_SIZE; i++) {
+        int val = analogRead(Mic);   // 0–4095
+        audioBuffer[i] = val >> 4;   // Scale to 8-bit
+      }
+      //Send Data
+      pCharacteristic->setValue(audioBuffer, BUFFER_SIZE);
+      pCharacteristic->notify();
+      delay(20);
+    }
+
+  } else{
+    started=false;
   }
 
-  if (!deviceConnected && oldDeviceConnected) {
-    delay(500);
-    BLEDevice::startAdvertising();
-    Serial.println("Restarted advertising");
-    oldDeviceConnected = deviceConnected;
-  }
-
-  if (deviceConnected && !oldDeviceConnected) {
-    oldDeviceConnected = deviceConnected;
-  }
 }
