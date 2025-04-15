@@ -1,139 +1,86 @@
 #include <Arduino.h>
 #include <BLEDevice.h>
-#include <BLEUtils.h>
 #include <BLEServer.h>
+#include <BLEUtils.h>
 #include <BLE2902.h>
-#include "esp_bt_device.h"
-#include "esp_gap_ble_api.h"
 
-// UUIDs
-#define SERVICE_UUID        "63661bda-e38c-4eb0-9389-12523579b526"
-#define CHARACTERISTIC_UUID "8fd0a2f0-e842-492b-8d9c-213e28678075"
+// BLE Settings
+#define DEVICE_NAME          "ESP32_BT_ML_PROJECT"
+#define SERVICE_UUID         "63661bda-e38c-4eb0-9389-12523579b526"
+#define CHARACTERISTIC_UUID  "8fd0a2f0-e842-492b-8d9c-213e28678075"
 
-BLEServer* pServer = nullptr;
-BLECharacteristic* pCharacteristic = nullptr;
+// Audio Settings
+const int SAMPLE_RATE = 22050;     // Hz
+const int DURATION_SECONDS = 15;   // Max recording time
+const int BUFFER_SIZE = 1024;      // Adjust based on MTU size (typically 20-512 bytes for BLE)
 
+// BLE Objects
+BLEServer *pServer;
+BLEService *pService;
+BLECharacteristic *pCharacteristic;
 bool deviceConnected = false;
-bool oldDeviceConnected = false;
-unsigned long lastNotifyTime = 0;
-const unsigned long notifyInterval = 1000; // 1 second
 
-// Server Callbacks
+// Audio Buffer
+int16_t audioBuffer[BUFFER_SIZE];  // 16-bit signed PCM
+size_t audioBufferIndex = 0;
+
+// BLE Server Callbacks
 class MyServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer* pServer) override {
+  void onConnect(BLEServer* pServer) {
     deviceConnected = true;
     Serial.println("Device connected");
   }
 
-  void onDisconnect(BLEServer* pServer) override {
+  void onDisconnect(BLEServer* pServer) {
     deviceConnected = false;
     Serial.println("Device disconnected");
+    // Restart advertising to allow reconnection
+    pServer->getAdvertising()->start();
   }
 };
 
-// Security Callbacks
-class MySecurity : public BLESecurityCallbacks {
-  uint32_t onPassKeyRequest() {
-    Serial.println("Passkey Requested");
-    return 123456;
+// Simulate Audio Data (Replace with actual ADC/I2S read)
+void readAudioSamples() {
+  for (int i = 0; i < BUFFER_SIZE; i++) {
+    audioBuffer[i] = analogRead(34) - 2048;  // Simulate 12-bit ADC (0-4095) -> (-2048 to 2047)
   }
-
-  void onPassKeyNotify(uint32_t pass_key) {
-    Serial.print("Passkey for pairing: ");
-    Serial.println(pass_key);
-  }
-
-  bool onConfirmPIN(uint32_t pass_key) {
-    Serial.print("Confirm Passkey: ");
-    Serial.println(pass_key);
-    return true;
-  }
-
-  bool onSecurityRequest() {
-    Serial.println("Security Requested");
-    return true;
-  }
-
-  void onAuthenticationComplete(esp_ble_auth_cmpl_t cmpl) {
-    if (cmpl.success) {
-      Serial.println("Authentication success");
-    } else {
-      Serial.println("Authentication failed");
-    }
-  }
-};
+}
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
+  Serial.println("Starting BLE Audio Streaming...");
 
-  Serial.println("Starting BLE...");
-  BLEDevice::init("ESP32_Audio_Test");
-  Serial.println(BLEDevice::getAddress().toString().c_str());
-
-
-  // Create BLE Server
+  // Initialize BLE
+  BLEDevice::init(DEVICE_NAME);
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
   // Create BLE Service
-  BLEService* pService = pServer->createService(SERVICE_UUID);
+  pService = pServer->createService(SERVICE_UUID);
 
-  // Create BLE Characteristic
+  // Create BLE Characteristic (Notify for streaming)
   pCharacteristic = pService->createCharacteristic(
     CHARACTERISTIC_UUID,
-    BLECharacteristic::PROPERTY_READ |
-    BLECharacteristic::PROPERTY_WRITE |
+    BLECharacteristic::PROPERTY_READ   |
     BLECharacteristic::PROPERTY_NOTIFY |
-    BLECharacteristic::PROPERTY_INDICATE
+    BLECharacteristic::PROPERTY_WRITE_NR
   );
+  pCharacteristic->addDescriptor(new BLE2902());  // Enable notifications
 
-  pCharacteristic->setValue("Hello from ESP32");
-  pCharacteristic->addDescriptor(new BLE2902());
-
-  // Start the service
+  // Start Service and Advertising
   pService->start();
-
-  // Advertise BLE
-  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(false);
-  pAdvertising->setMinPreferred(0x06);  // Recommended for Android
-  BLEDevice::startAdvertising();
-
-  Serial.println("BLE advertising started");
-
-  // Set up BLE security
-  BLESecurity *pSecurity = new BLESecurity();
-  pSecurity->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
-  pSecurity->setCapability(ESP_IO_CAP_OUT);  // Device shows passkey
-  pSecurity->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
-  pSecurity->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
-  pSecurity->setKeySize(16);
-  pSecurity->setStaticPIN(123456);  // Use this instead of setStaticPasskey
-  BLEDevice::setSecurityCallbacks(new MySecurity());
+  pServer->getAdvertising()->start();
+  Serial.println("BLE Ready. Waiting for client...");
 }
 
 void loop() {
-  unsigned long currentMillis = millis();
+  if (deviceConnected) {
+    // 1. Read audio samples (replace with actual ADC/I2S code)
+    readAudioSamples();
 
-  if (deviceConnected && (currentMillis - lastNotifyTime >= notifyInterval)) {
-    if (pCharacteristic != nullptr) {
-      pCharacteristic->setValue("New value from ESP32");
-      pCharacteristic->notify();
-      Serial.println("Notified client");
-    }
-    lastNotifyTime = currentMillis;
-  }
-
-  if (!deviceConnected && oldDeviceConnected) {
-    delay(500);
-    BLEDevice::startAdvertising();
-    Serial.println("Restarted advertising");
-    oldDeviceConnected = deviceConnected;
-  }
-
-  if (deviceConnected && !oldDeviceConnected) {
-    oldDeviceConnected = deviceConnected;
+    // 2. Send via BLE (chunked to avoid MTU limits)
+    pCharacteristic->setValue((uint8_t*)audioBuffer, BUFFER_SIZE * sizeof(int16_t));
+    pCharacteristic->notify();
+    delay(10);  // Adjust based on sample rate and buffer size
   }
 }

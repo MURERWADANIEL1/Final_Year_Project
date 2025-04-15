@@ -24,6 +24,7 @@ SAMPLE_RATE = 22050 #Hz
 N_MELS = 128  # Example: Number of Mel bands used during training
 FEATURE_SIZE = 3840  # Must match model input shape
 DURATION = 15  # Seconds to record
+CHUNK_SIZE=20
 MODEL_PATH = r"C:\Users\Jiary\Documents\GitHub\ML\Project\respiratory_cnn_model.lite"
 MIN_CONFIDENCE = 0.7  # Minimum confidence for a valid prediction
 
@@ -64,45 +65,40 @@ output_details = interpreter.get_output_details()
 
 
 class AudioRecorder:
-    def __init__(self, address, characteristic_uuid, duration, sample_rate):
-        self.address = address
-        self.characteristic_uuid = characteristic_uuid
-        self.duration = duration
-        self.sample_rate = sample_rate
+    def __init__(self):
         self.audio_data = []
-        self.is_recording = False
+        self.start_time = None
+        
+    async def notification_handler(self, sender, data):
+        samples = np.frombuffer(data, dtype=np.int16)
+        self.audio_data.extend(samples)
+        
+        # Print progress every second
+        elapsed = time.time() - self.start_time
+        if int(elapsed) != int(elapsed - 0.1):  # Update once per second
+            print(f"Recording: {elapsed:.1f}s | Samples: {len(self.audio_data)}")
 
-    async def notification_handler(self, sender, data):      
-        if self.is_recording:
-            samples = np.frombuffer(data, dtype=np.int16)
-            self.audio_data.extend(samples)
-
-    async def record_audio_from_ble(self):
-        print(f"Recording {self.duration} seconds of audio from BLE...")
+    async def record_audio(self):
+        print(f"Starting {DURATION}-second recording...")
         self.audio_data = []
-        self.is_recording = True
-        num_samples = self.sample_rate * self.duration
-        start_time = time.time()
-
-        async with BleakClient(self.address) as client:
-            if not client.is_connected:
-                print(f"Failed to connect to {self.address}")
-                return None
-            print(f"Connected to {DEVICE_NAME}: {self.address}")
-            await client.start_notify(self.characteristic_uuid, self.notification_handler)
-
-            while len(self.audio_data) < num_samples:
-                if time.time() - start_time > self.duration + 2:
-                    print("Timeout: Did not receive enough data within the expected time.")
-                    break
+        self.start_time = time.time()
+        
+        async with BleakClient(DEVICE_ADDRESS) as client:
+            await client.start_notify(CHARACTERISTIC_UUID, self.notification_handler)
+            
+            while (time.time() - self.start_time) < DURATION:
                 await asyncio.sleep(0.1)  # Check every 100ms
-
-            await client.stop_notify(self.characteristic_uuid)
-            print("Recording complete!")
-            self.is_recording = False
-        return np.array(self.audio_data[:num_samples], dtype=np.int16)
-
-
+            
+            await client.stop_notify(CHARACTERISTIC_UUID)
+        
+        # Convert to numpy array and save
+        audio_array = np.array(self.audio_data, dtype=np.int16)
+        print(f"Recording complete! Total samples: {len(audio_array)}")
+        
+        # Save as WAV file
+        filename = f"ble_recording_{int(time.time())}.wav"
+        sf.write(filename, audio_array, SAMPLE_RATE)
+        print(f"Saved as {filename}")
 
 
 def extract_features(audio_data, sample_rate):
