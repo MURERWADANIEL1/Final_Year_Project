@@ -2,174 +2,395 @@ import numpy as np
 import librosa
 import time
 import os
-import shutil
 import wave
 import tensorflow.lite as tflite
 import soundfile as sf
 import asyncio
 import sys
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-from bleak import BleakClient
+from bleak import BleakClient, BleakScanner
+from bleak.exc import BleakDeviceNotFoundError, BleakError
 from datetime import datetime
-from bleak import BleakScanner, BleakClient
-from bleak.backends.device import BLEDevice
 
 # Constants
-DEVICE_ADDRESS = "10:06:1c:f4:7e:1e"  #MAC Address
+DEVICE_NAME = "ESP32_ML_PROJECT"
 BLE_SERVICE_UUID = "63661bda-e38c-4eb0-9389-12523579b526"
 BLE_CHAR_UUID = "8fd0a2f0-e842-492b-8d9c-213e28678075"
-DEVICE_NAME=  "ESP32_BT_ML_PROJECT"
-SAMPLE_RATE = 22050 #Hz
-N_MELS = 128  # Example: Number of Mel bands used during training
-FEATURE_SIZE = 3840  # Must match model input shape
+SAMPLE_RATE = 22050  # Hz
+N_MELS = 128
+FEATURE_SIZE = 3840
 DURATION = 15  # Seconds to record
-CHUNK_SIZE=20
-MODEL_PATH = r"C:\Users\Jiary\Documents\GitHub\ML\Project\respiratory_cnn_model.lite"
-MIN_CONFIDENCE = 0.7  # Minimum confidence for a valid prediction
+MODEL_PATH = r"C:\Users\Jiary\Documents\GitHub\ML\Project\Model/respiratory_cnn_model.lite"
+MIN_CONFIDENCE = 0.7  # Minimum confidence for valid prediction
 
-esp32_address = "10:06:1c:f4:7e:1e"
 
-async def test_ble_connection():
-    print("Scanning...")
-    device = await BleakScanner.find_device_by_address(esp32_address, timeout=10.0)
-    if not device:
-        print("Device not found.")
-        return
-
-    print("Found device. Connecting...")
-    client = BleakClient(esp32_address)
-    await client.connect()
-    if client.is_connected:
-        print("Connected successfully!")
-    await client.disconnect()
-
-asyncio.run(test_ble_connection())
 
 class_labels = ["Healthy", "COPD", "URTI", "Bronchiectasis", "Pneumonia", "Bronchiolitis"]
-
-# Load TFLite model
-try:
-    interpreter = tflite.Interpreter(model_path=MODEL_PATH)
-    interpreter.allocate_tensors()
-    print(f"Loaded TFLite model from {MODEL_PATH}")
-except Exception as e:
-    print(f"Error loading TFLite model: {e}")
-    exit()
-
-
-# Get model input/output details
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
 
 
 
 class AudioRecorder:
-    def __init__(self):
-        self.audio_data = []
-        self.start_time = None
-        
-    async def notification_handler(self, sender, data):
-        samples = np.frombuffer(data, dtype=np.int16)
-        self.audio_data.extend(samples)
-        
-        # Print progress every second
-        elapsed = time.time() - self.start_time
-        if int(elapsed) != int(elapsed - 0.1):  # Update once per second
-            print(f"Recording: {elapsed:.1f}s | Samples: {len(self.audio_data)}")
 
-    async def record_audio(self):
-        print(f"Starting {DURATION}-second recording...")
+    def __init__(self, device_name, ble_char_uuid, duration, sample_rate):
+
+        self.device_name = device_name
+
+        self.ble_char_uuid = ble_char_uuid
+
+        self.duration = duration
+
+        self.sample_rate = sample_rate
+
         self.audio_data = []
+
+        self.start_time = None
+
+        self.client = None
+
+        self.connected = False
+
+
+
+    def handle_disconnect(self, client):
+
+        print("âš ï¸ Device disconnected!")
+
+        self.connected = False
+
+        # Attempt to reconnect automatically
+
+        asyncio.create_task(self.ensure_connection())
+
+
+
+    async def ensure_connection(self, timeout=10.0):
+
+        if self.connected:
+
+            return True
+
+            
+
+        print("Attempting to connect...")
+
+        try:
+
+            device= await BleakScanner.find_device_by_name(self.device_name, timeout=timeout)
+
+            if not device:
+
+                raise BleakDeviceNotFoundError(f"Device '{self.device_name}' not found")
+
+            self.client = BleakClient(device,  
+
+            disconnected_callback=self.handle_disconnect
+
+            )
+
+            await self.client.connect(timeout=timeout)
+
+            self.connected = self.client.is_connected
+
+            if self.connected:
+
+                print("? Connected successfully")
+
+            return self.connected
+
+        except Exception as e:
+
+            print(f"Connection failed: {e}")
+
+            return False
+
+
+
+    async def notification_handler(self, sender, data):
+
+        try:
+
+            samples = np.frombuffer(data, dtype=np.int16)
+
+            self.audio_data.extend(samples)
+
+            
+
+            elapsed = time.time() - self.start_time
+
+            if int(elapsed) != int(elapsed - 0.1):  # Update once per second
+
+                print(f"Recording: {elapsed:.1f}s | Samples: {len(self.audio_data)}")
+
+        except Exception as e:
+
+            print(f"Error in notification handler: {e}")
+
+
+
+    async def record_audio_from_ble(self):
+
+        print(f"Starting {self.duration}-second recording...")
+
+        self.audio_data = []
+
         self.start_time = time.time()
-        
-        async with BleakClient(DEVICE_ADDRESS) as client:
-            await client.start_notify(CHARACTERISTIC_UUID, self.notification_handler)
+
+
+
+        try:
+
+            if not await self.ensure_connection():
+
+                raise Exception("Could not establish BLE connection")
+
+
+
+            await self.client.start_notify(self.ble_char_uuid, self.notification_handler)
+
             
-            while (time.time() - self.start_time) < DURATION:
-                await asyncio.sleep(0.1)  # Check every 100ms
+
+            # Main recording loop
+
+            while (time.time() - self.start_time) < self.duration:
+
+                if not self.connected:
+
+                    raise Exception("Connection lost during recording")
+
+                await asyncio.sleep(0.1)
+
             
-            await client.stop_notify(CHARACTERISTIC_UUID)
-        
-        # Convert to numpy array and save
-        audio_array = np.array(self.audio_data, dtype=np.int16)
-        print(f"Recording complete! Total samples: {len(audio_array)}")
-        
-        # Save as WAV file
-        filename = f"ble_recording_{int(time.time())}.wav"
-        sf.write(filename, audio_array, SAMPLE_RATE)
-        print(f"Saved as {filename}")
+
+            await self.client.stop_notify(self.ble_char_uuid)
+
+            
+
+            if not self.audio_data:
+
+                raise Exception("No audio data received")
+
+                
+
+            audio_array = np.array(self.audio_data, dtype=np.int16)
+
+            print(f"Recording complete! Total samples: {len(audio_array)}")
+
+            
+
+            # Save as WAV file
+
+            filename = f"ble_recording_{int(time.time())}.wav"
+
+            sf.write(filename, audio_array, self.sample_rate)
+
+            print(f"Saved as {filename}")
+
+            
+
+            return audio_array
+
+            
+
+        except Exception as e:
+
+            print(f"âš ï¸ Recording error: {e}")
+
+            raise
+
+        finally:
+
+            if self.client and self.connected:
+
+                await self.client.stop_notify(self.ble_char_uuid)
+
+                await self.client.disconnect()
+
+                self.connected = False
+
 
 
 def extract_features(audio_data, sample_rate):
-    """Extracts a Mel spectrogram and reshapes it to match model input."""
-    # Convert to float32 and normalize to [-1, 1]
+
+    """Extracts Mel spectrogram and reshapes for model input."""
+
+    if len(audio_data) == 0:
+
+        raise ValueError("Empty audio data received")
+
+    
+
+    # Convert and normalize audio
+
     audio_data = audio_data.astype(np.float32) / np.iinfo(np.int16).max
 
+
+
     # Compute Mel spectrogram
-    spectrogram = librosa.feature.melspectrogram(y=audio_data, sr=sample_rate, n_mels=N_MELS)
-    spectrogram = librosa.power_to_db(spectrogram, ref=np.max)  # Convert to dB scale
 
-    # Normalize to [0, 1] (important for TFLite model) - Use training data min/max if possible
-    # Example: Assuming you know the min/max from training:
-    train_min = -80.0  # Replace with your actual training min
-    train_max = 0.0   # Replace with your actual training max
+    spectrogram = librosa.feature.melspectrogram(
+
+        y=audio_data, 
+
+        sr=sample_rate, 
+
+        n_mels=N_MELS
+
+    )
+
+    spectrogram = librosa.power_to_db(spectrogram, ref=np.max)
+
+
+
+    # Normalize to [0, 1] using training min/max
+
+    train_min, train_max = -80.0, 0.0
+
     spectrogram = (spectrogram - train_min) / (train_max - train_min)
-    spectrogram = np.clip(spectrogram, 0, 1) # Clip values to be within [0,1]
 
-    # Flatten to 1D feature vector
+    spectrogram = np.clip(spectrogram, 0, 1)
+
+
+
+    # Flatten and ensure correct size
+
     spectrogram = spectrogram.flatten()
-    print(f"Spectrogram Shape: {spectrogram.shape}")  # (n_mels, time_frames)
-    print(f"Number of Features: {spectrogram.size}")
 
-    # Ensure it has exactly FEATURE_SIZE elements
-    if len(spectrogram) != FEATURE_SIZE:
-        print(f"Warning: Spectrogram size ({len(spectrogram)}) does not match expected size ({FEATURE_SIZE}).")
-        if len(spectrogram) > FEATURE_SIZE:
-            spectrogram = spectrogram[:FEATURE_SIZE]  # Trim
-        else:
-            spectrogram = np.pad(spectrogram, (0, FEATURE_SIZE - len(spectrogram)), mode='constant')  # Pad
+    if len(spectrogram) > FEATURE_SIZE:
 
-    # Reshape to match TFLite input (1, 3840)
+        spectrogram = spectrogram[:FEATURE_SIZE]
+
+    else:
+
+        spectrogram = np.pad(
+
+            spectrogram, 
+
+            (0, FEATURE_SIZE - len(spectrogram)), 
+
+            mode='constant'
+
+        )
+
+
+
     return np.expand_dims(spectrogram, axis=0).astype(np.float32)
 
 
 
-
 async def classify_audio():
-    """Records audio, extracts features, and runs inference."""
-    recorder= AudioRecorder(DEVICE_ADDRESS, BLE_CHAR_UUID, DURATION, SAMPLE_RATE)
-    audio_data = await recorder.record_audio_from_ble()
-    if audio_data is None or len(audio_data) == 0:
-        print("No audio data received.")
-        return
 
-    # Prepare WAV file
-    filename = f"recorded_audio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
-    wav_file = wave.open(filename, "wb")
-    wav_file.setnchannels(1)  # Mono
-    wav_file.setsampwidth(2)  # 16-bit audio (same as ESP32 ADC output)
-    wav_file.setframerate(SAMPLE_RATE)
-    wav_file.writeframes(audio_data.tobytes())
-    print(f"Recording saved as {filename}")
+    """Main function to record and classify audio."""
 
-    spectrogram = extract_features(audio_data, SAMPLE_RATE)
+    try:
 
-    # Set input tensor
-    interpreter.set_tensor(input_details[0]['index'], spectrogram)
-    interpreter.invoke()
-    # Get output tensor
-    output_data = interpreter.get_tensor(output_details[0]['index'])
-    # Get predicted label
-    predicted_label = np.argmax(output_data)  # Get class with highest confidence
-    confidence = output_data[0][predicted_label]  # Confidence score
+        # Initialize TFLite model
 
-    if confidence >= MIN_CONFIDENCE:
-        print(f"Prediction: {class_labels[predicted_label]} (Confidence: {confidence:.2f})")
-    else:
-        print(f"Prediction: Unknown (Confidence: {confidence:.2f} below threshold)")
-    print(f"Raw model output: {output_data}")
+        interpreter = tflite.Interpreter(model_path=MODEL_PATH)
+
+        interpreter.allocate_tensors()
+
+        input_details = interpreter.get_input_details()
+
+        output_details = interpreter.get_output_details()
+
+        print(f"Loaded TFLite model from {MODEL_PATH}")
+
+
+
+        # Record audio
+
+        recorder = AudioRecorder(DEVICE_ADDRESS, BLE_CHAR_UUID, DURATION, SAMPLE_RATE)
+
+        audio_data = await recorder.record_audio_from_ble()
+
+
+
+        # Extract features and predict
+
+        spectrogram = extract_features(audio_data, SAMPLE_RATE)
+
+        interpreter.set_tensor(input_details[0]['index'], spectrogram)
+
+        interpreter.invoke()
+
+        output_data = interpreter.get_tensor(output_details[0]['index'])
+
+        
+
+        # Process results
+
+        predicted_label = np.argmax(output_data)
+
+        confidence = output_data[0][predicted_label]
+
+        
+
+        if confidence >= MIN_CONFIDENCE:
+
+            print(f"Prediction: {class_labels[predicted_label]} (Confidence: {confidence:.2f})")
+
+        else:
+
+            print(f"Prediction: Unknown (Confidence: {confidence:.2f} below threshold)")
+
+            
+
+    except Exception as e:
+
+        print(f"âš ï¸ Classification error: {e}")
+
+
+
+async def test_ble_connection():
+
+    """Test BLE connection before main recording."""
+
+    print("Testing BLE connection...")
+
+    try:
+
+        device = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=10.0)
+
+        if not device:
+
+            raise BleakDeviceNotFoundError(f"Device {DEVICE_NAME} not found")
+
+            
+
+        async with BleakClient(device) as client:
+
+            if client.is_connected:
+
+                print("âœ… Connection test successful")
+
+            else:
+
+                raise Exception("Failed to connect")
+
+    except Exception as e:
+
+        print(f"âš ï¸ Connection test failed: {e}")
+
+        raise
+
+
 
 if __name__ == "__main__":
-    asyncio.run(classify_audio())
+
+    try:
+
+        # First test the connection
+
+        asyncio.run(test_ble_connection())
+
+        # Then run the main classification
+
+        asyncio.run(classify_audio())
+
+    except KeyboardInterrupt:
+
+        print("Script interrupted by user")
+
+    except Exception as e:
+
+        print(f"âš ï¸ Fatal error: {e}")
 
