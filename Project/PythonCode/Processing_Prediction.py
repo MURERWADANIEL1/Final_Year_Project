@@ -27,6 +27,7 @@ def create_spectrogram(audio_path, target_shape=(128, 128)):
         return None
 
 def visualize_prediction(prediction, spectrogram, disease, confidence):
+    
     """Visualize both spectrogram and class probabilities"""
     plt.figure(figsize=(15, 5))
     
