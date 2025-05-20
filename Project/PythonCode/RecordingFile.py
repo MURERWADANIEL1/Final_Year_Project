@@ -27,6 +27,7 @@ class BLERecorder:
         async with BleakClient(device.address) as client:
             print("\n Connection Established:")
             print(f"   Device: {client.address}")
+            #mtu_size=client.request_mtu(247)
             print(f"   MTU Size: {client.mtu_size}")
             
             # Proper service count using list conversion

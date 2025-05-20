@@ -8,16 +8,19 @@
 #define DEVICE_NAME "ESP32_ML_PROJECT"
 #define SERVICE_UUID "63661bda-e38c-4eb0-9389-12523579b526"
 #define CHARACTERISTIC_UUID "8fd0a2f0-e842-492b-8d9c-213e28678075"
-#define PASSKEY 123456  // Change this for production
+#define PASSKEY 123456  
 
 // Audio Settings
-const int BUFFER_SIZE = 128;
-const int CHUNK_SIZE = 20;
+#define ADC_PIN 34
+#define SAMPLE_RATE 22050 // Hz
+//#define SAMPLES_PER_BATCH 220
+#define CHUNK_SIZE 20 
 
 BLEServer *pServer;
 BLEService *pService;
 BLECharacteristic *pCharacteristic;
 bool deviceConnected = false;
+uint16_t conn_id;
 
 // Server Callbacks
 class MyServerCallbacks : public BLEServerCallbacks {
@@ -69,6 +72,8 @@ void setup() {
 
     // Initialize BLE
     BLEDevice::init(DEVICE_NAME);
+
+     //BLEDevice::setMTU(247);  
     
     // Setup Security
     BLESecurity *pSecurity = new BLESecurity();
@@ -107,27 +112,29 @@ void setup() {
     pAdvertising->start();
     
     Serial.println("BLE Ready! Waiting for connections...");
+
 }
 
 void loop() {
     if (deviceConnected) {
-        int16_t audioBuffer[BUFFER_SIZE];
-        
-        // Simulate audio data
-        for(int i = 0; i < BUFFER_SIZE; i++) {
+
+        const int SAMPLES_PER_BATCH = 220;  
+        int16_t audioBuffer[SAMPLES_PER_BATCH];
+
+        for (int i = 0; i < SAMPLES_PER_BATCH; i++) {
             audioBuffer[i] = random(-32768, 32767); 
         }
 
-        // Send in chunks
-        for(int i = 0; i < BUFFER_SIZE; i += CHUNK_SIZE) {
-            int chunk_len = min(CHUNK_SIZE, BUFFER_SIZE - i);
-            pCharacteristic->setValue((uint8_t*)&audioBuffer[i], chunk_len * 2);
-            pCharacteristic->notify();
-            delay(50);  // ~22050 samples/sec
-        }
-        
-        Serial.printf("Sent %d samples\n", BUFFER_SIZE);
-        delay(500);
+        // Send all samples
+        int offset = 0;
+        while (offset < SAMPLES_PER_BATCH) {
+        int chunkSize = min(20, SAMPLES_PER_BATCH - offset);
+        pCharacteristic->setValue((uint8_t*)&audioBuffer[offset], chunkSize * 2);
+        pCharacteristic->notify();
+        Serial.printf("Sending %d samples...\n", chunkSize);  
+        offset += chunkSize;
+        delay(5);  
     }
-    delay(10);
+    delay(1);
+}
 }
